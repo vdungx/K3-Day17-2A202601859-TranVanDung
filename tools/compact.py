@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tái cấu trúc dataset Parquet của dashboard — NHIỆM VỤ 4.  CHƯA CÓ LOGIC.
+"""Tái cấu trúc dataset Parquet của dashboard — NHIỆM VỤ 4.
 
 Hiện trạng: `data/gold_events/` gồm 5.000 file, mỗi file vài chục KB, không
 partition, thứ tự hàng ngẫu nhiên.
@@ -63,27 +63,37 @@ def main() -> int:
     n_src = len(list(SRC.glob("*.parquet")))
     print(f"  nguồn : {SRC}  ({n_src:,} file)")
 
-    # TODO(nhiệm vụ 4): hiện thực khung COPY ... TO ... ở phần docstring.
-    #
-    #   con.execute(f"""
-    #       copy (
-    #           select * from read_parquet('{SRC}/*.parquet')
-    #           order by ...
-    #       ) to '{DST}' (
-    #           format parquet,
-    #           partition_by (...),
-    #           overwrite_or_ignore,
-    #           row_group_size ...
-    #       )
-    #   """)
-    #
-    # Sau đó kiểm tra không mất hàng nào:
-    #
-    #   assert <số row dataset cũ> == <số row dataset mới>
+    src_glob = (SRC / "*.parquet").as_posix()
+    dst_path = DST.as_posix()
+    n_rows_src = con.execute(
+        f"select count(*) from read_parquet('{src_glob}')"
+    ).fetchone()[0]
 
-    print("\n  tools/compact.py chưa được hiện thực — đây là nhiệm vụ 4.")
-    print("  Mở file này, đọc phần KHUNG THỰC HIỆN ở đầu file và điền vào TODO.")
-    print("  Hướng dẫn từng bước: GUIDE.md mục 4.\n")
+    con.execute(f"""
+        copy (
+            select *
+            from read_parquet('{src_glob}')
+            order by event_date, customer_name, event_time
+        ) to '{dst_path}' (
+            format parquet,
+            partition_by (event_date),
+            overwrite_or_ignore,
+            row_group_size 2048
+        )
+    """)
+
+    dst_glob = (DST / "**" / "*.parquet").as_posix()
+    n_rows_dst = con.execute(
+        f"select count(*) from read_parquet('{dst_glob}', hive_partitioning = true)"
+    ).fetchone()[0]
+    assert n_rows_src == n_rows_dst, (
+        f"mất dữ liệu khi compact: nguồn={n_rows_src:,}, đích={n_rows_dst:,}"
+    )
+
+    n_dst = len(list(DST.rglob("*.parquet")))
+    print(f"  đích  : {DST}  ({n_dst:,} file)")
+    print(f"  số hàng: {n_rows_src:,} -> {n_rows_dst:,} (không đổi)\n")
+    con.close()
     return 0
 
 
